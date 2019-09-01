@@ -350,7 +350,7 @@ datatable(player_week_view0,
 
 ## Conclusion
 
-Ok, well that is all I got. Hopefully I'll be back by the end of the week or so with some data on the first week of 2019. No promises, though. The content I made for this will be pretty different than what I'll put together for any kind of weekly recaps. Sleeper is awesome so the code to fetch and gather the data will not need updating. I'll just have to figure out what kind of analytic content I should put together for weekly updates. I am open to suggestions. 
+Ok, well that is all I got. Hopefully I'll be back by the end of next week or so with some data on the first week of 2019. No promises, though. The content I made for this will be pretty different than what I'll put together for any kind of weekly recaps. Sleeper is awesome so the code to fetch and gather the data will not need updating. I'll just have to figure out what kind of analytic content I should put together for weekly updates. I am open to suggestions. 
 
 If anyone is a super nerd, I am using GitHub for source control on this and the [repository is linked out here](https://github.com/ncriswell/sleeper_fantasy). I am using the `R` language along with the `knitr` package to make these. All that code is out on the repo so feel free to go poke around if that is your thing. 
 
