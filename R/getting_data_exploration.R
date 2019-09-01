@@ -87,17 +87,16 @@ player_res_no_lists <- lapply(player_res,
 
 # Abstract season and week
 working_season <- 2018
-working_week <- 13
 
 # Get the player stats data
-stats_res <- lapply(1:working_week,
+stats_res <- lapply(1:13,
                     function(m)
                       fromJSON(
                         glue("https://api.sleeper.app/v1/stats/nfl/regular/2018/",
                              m)
                       ))
 
-# The stats are a list in a list in a list. Combine each weeks into a large 
+# The stats are a list in a list in a list. Combine each week into a large 
 #  data frame. 
 stats_res_comb <- lapply(stats_res, function(m) bind_rows(m, .id = "player_id"))
 
@@ -137,7 +136,7 @@ player_stats_sum1 <- player_stats_sum0 %>%
 
 #### ~~Matchup Data~~ ####======================================================
 # Get the matchup data
-mu_res <- lapply(1:working_week, 
+mu_res <- lapply(1:13, 
                  function(m) fromJSON(glue("https://api.sleeper.app/v1/league/", 
                                            s18_lg_id, 
                                            "/matchups/", m)))
