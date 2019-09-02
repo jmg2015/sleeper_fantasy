@@ -113,7 +113,7 @@ datatable(owner_wl1,
           caption = "TLST 2018 NFL Season: Season Summary",
           filter = 'top',
           extensions = 'Buttons', 
-          options = list(dom = 'Bfrtip', 
+          options = list(dom = 'lBfrtip', 
                          buttons = list('excel', "csv"),
                          pageLength = 14, autoWidth = TRUE))
 
@@ -154,7 +154,7 @@ ggplot(data = owner_wl_melt0, aes(x = `Owner For/Against`, y = value, fill = Out
   coord_flip() + 
   scale_x_discrete(name = "Owner: Avg Points For / Avg Points Against ") + 
   scale_y_continuous(breaks = 1:10, name = "Number of Wins or Losses") +
-  scale_fill_fivethirtyeight() +
+    scale_fill_brewer(palette = "Set1") + 
     ggtitle("TLST NFL Owner Win/Loss Record",
           subtitle = "y-axis label represents owner and average points for / points against record") + 
   labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
@@ -164,7 +164,7 @@ ggplot(data = owner_wl_melt0, aes(x = `Owner For/Against`, y = value, fill = Out
 
 ```
 
-Well look at that. Jon and Joe were the same even even though Jon scored more on average. My red bar is so short. Hopefully, this whole API thing will help me right the ship. 
+Well look at that. Jon and Joe were the same even even though Jon scored more on average. My blue bar is so short. Hopefully, this whole API thing will help me right the ship. 
 
 ## Overall Weekly Performance
 
@@ -180,9 +180,9 @@ datatable(weekly_owner_scores1,
           caption = "TLST 2018 NFL Season: Weekly Scores",
           filter = 'top',
           extensions = 'Buttons', 
-          options = list(dom = 'Bfrtip', 
+          options = list(dom = 'lBfrtip', 
                          buttons = list('excel', "csv"),
-                         pageLength = 14, autoWidth = TRUE))
+                          autoWidth = TRUE))
 
 ```
 
@@ -202,13 +202,13 @@ ggplot(data = weekly_owner_scores_melt0, aes(x = Week, y = value, color = Points
   geom_line(size = 1.3) + 
   geom_hline(data = avg_owner_score, 
              aes(yintercept = avg_points_for), 
-             colour = "#FF2700", linetype = "dashed", size = 1.15) + 
+             colour = "#377EB8", linetype = "dashed", size = 1.15) + 
   geom_hline(data = avg_owner_score, 
              aes(yintercept = avg_points_against), 
-             colour = "#008fd5", linetype = "dashed", size = 1.15) + 
+             colour = "#E41A1C", linetype = "dashed", size = 1.15) + 
   facet_wrap(~Owner) + 
   scale_y_continuous("Point Total") + 
-  scale_colour_fivethirtyeight() + 
+  scale_colour_brewer(palette = "Set1") + 
   facet_wrap(~Owner, scales = "free_x") + 
   ggtitle("TLST NFL Weekly Point Totals by Owner",
           subtitle = "Owner average indicated with dotted lines") + 
@@ -230,7 +230,7 @@ We'll now drop the individual panels and show the distributions of points for an
 ggplot(data = weekly_owner_scores_melt0, aes(x = Owner, y = value, fill = Points)) +
   geom_boxplot() + 
   scale_y_continuous("Point Total") + 
-  scale_fill_fivethirtyeight() + 
+  scale_fill_brewer(palette = "Set1") + 
   ggtitle("TLST NFL Weekly Point Totals Distribution by Owner") + 
   labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
   theme_fivethirtyeight() + 
@@ -341,7 +341,7 @@ datatable(player_week_view0,
           caption = "TLST 2018 NFL Season: Player Weekly Scores",
           filter = 'top',
           extensions = 'Buttons', 
-          options = list(dom = 'Bfrtip', 
+          options = list(dom = 'lBfrtip', 
                          buttons = list('excel', "csv"),
                          pageLength = 14, autoWidth = TRUE))
 
