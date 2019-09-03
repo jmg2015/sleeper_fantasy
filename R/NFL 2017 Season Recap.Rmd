@@ -1,0 +1,361 @@
+---
+title: "TLST 2017 NFL Retrospective"
+always_allow_html: yes
+output: 
+  html_document:
+    css: ../css/tlst.css
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(jsonlite)       # Pulling down JSON data
+library(tidyverse)      # Tools for data analysis
+library(glue)           # Sticking strings together
+library(RColorBrewer)   # Color Pals
+library(plotly)         # Interactive graphics
+library(DT)             # JS DT libs
+library(ggthemes)       # themes for ggplots
+library(scales)         # better ggplot labels
+```
+
+```{r data gather, cache = TRUE}
+source("get_2017_data.R")
+```
+
+
+
+
+<script type="text/javascript">
+  // When the document is fully rendered...
+  $(document).ready(function() {
+    // ...select all header elements...
+    $('h1, h2, h3, h4, h5').each(function() {
+      // ...and add an id to them corresponding to their 'titles'
+      $(this).attr('id', $(this).html());
+    });
+  });
+</script>
+
+## Introduction
+
+Some might say that doing a data-driven retrospective on a previous season as the current season starts is a little useless. Those people are probably right, but they should have done it themselves if they are so clever. I think that Sleeper's API has been improved over the off season and now I can (maybe) start doing weekly recaps that include graphs, tables, and other nerd stuff. (See the <a href="#What the Hell is an API?">What the Hell is an API section of the appendix</a> if you want to know more about what that means. Simply put, Sleeper's API lets me pull all the league and player stat data I will need to report on whatever we want to report on.) I wanted to test this out and figured a recap of 2017 would be a good way to do that.  
+
+Disclaimers are good to get out of the way early, so let's do that now. 
+
+* I am using a process to create this document where the code to pull and analyze the data is written in the same file as the text you are reading now. Magic, right? However, the spelling and grammar check for my code editor of choice is...not great. Coupled with the fact that I'm already effectively functionally illiterate, the chance for typos is high. 
+
+* I have spot checked all of the results that I pulled from the API against the actual values on the Sleeper site. They are usually spot on, but I have found about 0.2% of scores that are slightly off. I don't know how this could happen. Maybe it is something that will become clear as we go through the 2019 season and can check things in real-time. 
+
+* The analysis will all be scripted once we get into the season, so I don't anticipate a lot of work to type these up each week. But, I haven't really figured out a few things I'd like to eventually incorporate that will automate some of the explanatory text/commentary. Thus, some of the early reports will be heavy on tables and graphs and light on explanation. We'll leave the commentary to the commish. And, the content for a weekly update will be much different than a several months overdue season recap. What I'm saying is that the first couple of weeks are going to be rough and/or non-existent. 
+
+* I feel like this platform of analysis (HTML doc) is good but not great. I have some other things in mind, but this is definitely the easiest way to present the results as I can combine the data gathering, data analysis, and explanation into a quickly reproducible result. So there is a chance I'll try something different, but I'll be going with the HTML approach for now. 
+
+* The look and feel of this report is pretty minimal for now. I am not really a web developer by trade, so I have a lot to learn about making stuff like this more customized and nice looking. I think this project will be a good way for me to learn that kind of thing. Perhaps I'll even improve my actual fantasy performance through this process. Who knows. 
+
+* The legibility of some of the graphs is going to be a problem due to the league size. Do you know how hard it is to make a color pallet that has 14 colors that are different enough to tell apart in a graph? Anyways, I am going to steal [fivethirtyeight.com's](https://fivethirtyeight.com/) graph themes until I decide on my own. 
+
+I think that covers it. I am a big nerd so making this was pretty fun. Hopefully all the code I've written to pull together the 2017 data will be easily adaptable to 2019. As (if?) you go through this document, you'll see that we are mostly looking at summary stats. I think it would be fun to tinker around a bit with some more predictive work. The API contains literally every stat that contributes to overall player score and also some crazy stuff like game time temperature and humidity. We could really go nuts with this. If there is some kind of analysis you would want to see, please <a href = "mailto: ncriswell@gmail.com">send me an email</a> or text, and I'll see what I can do. 
+
+## Overall Season Performance
+
+This is probably news to the people reading this (if anyone is still reading things) but I didn't pay as much attention to the league last year as perhaps I should have. Let's do a quick recap of records and average scores to remind ourselves. 
+
+```{r}
+weekly_owner_scores0 <- mu_unnest_view2 %>% 
+  group_by(week, display_name, matchup_id) %>% 
+  summarise(tot_points = round(sum(player_score, na.rm = TRUE), 2)) %>% 
+  ungroup() %>% 
+  mutate(week = as.numeric(week))
+
+# Now do a sort of self join kind of deal to stick the points against. 
+
+ weekly_owner_scores1 <- weekly_owner_scores0 %>% 
+  left_join(weekly_owner_scores0, by = c("week", "matchup_id")) %>% 
+  filter(display_name.x != display_name.y) %>% 
+  mutate(Week = as.factor(week),
+         display_name.x = as.factor(display_name.x)) %>% 
+  select(Week, display_name.x, tot_points.x, tot_points.y) %>% 
+  rename(`Owner` = display_name.x, 
+         `Points For` = tot_points.x, 
+         `Points Against` = tot_points.y) %>% 
+  arrange(Week)
+
+# get number of wins by owner
+owner_wl0 <- weekly_owner_scores1 %>% 
+  mutate(Win = `Points For` > `Points Against`,
+         Loss = !Win) %>% 
+  select(Owner, Win, Loss) %>% 
+  group_by(Owner) %>% 
+  summarise(Wins = sum(Win), 
+            Losses = sum(Loss)) 
+
+# lets also get the avearge points for and points against by owner
+avg_owner_score <- weekly_owner_scores1 %>% 
+  group_by(Owner) %>% 
+  summarise(avg_points_for = round(mean(`Points For`), 0), 
+            avg_points_against = round(mean(`Points Against`), 0))
+
+# Stick these together and make a DT
+owner_wl1 <- owner_wl0 %>% 
+  left_join(avg_owner_score, by = c("Owner")) %>% 
+  arrange(desc(Wins)) %>% 
+  rename(`Avg Points For` = avg_points_for, 
+         `Avg Points Against` = avg_points_against) 
+  
+datatable(owner_wl1,
+          class = 'cell-border stripe',
+          rownames = FALSE, 
+          caption = "TLST 2017 NFL Season: Season Summary",
+          filter = 'top',
+          extensions = 'Buttons', 
+          options = list(dom = 'lBfrtip', 
+                         buttons = list('excel', "csv"),
+                         pageLength = 14, autoWidth = TRUE))
+
+
+```
+
+There ya go. Nice recap of how things shook out last season. The table is mildly interactive so you should be able to sort and filter a bit, and I have added download buttons. Not really sure how it will render on a phone, so you might need to find a computer. 
+
+From that table we see `SeltzerBod`, `OttoBod`, and `CharBod` all won a whole bunch. `CrizzleyBod` can't use his (mine) above average points against total to justify his terrible record as he was the only person to not clear the average 100 points for. Yikes. `BaloneyBod` probably qualifies for some kind of award for being unlucky in that his average points for is pretty high but not as high as his league-leading points against. (Tony, I don't really know you, but I assume that like all Tonys, you prefer to be called Tony Baloney as a nickname.) `SeltzerBod` was sort of in the opposite boat.
+
+Tables are fine, but sometimes it is handy to visualize information. Let's do that now. 
+
+```{r, fig.align='center', fig.width = 10, fig.height=10}
+
+# get number of wins by owner
+owner_wl0 <- weekly_owner_scores1 %>% 
+  mutate(Win = `Points For` > `Points Against`,
+         Loss = !Win) %>% 
+  select(Owner, Win, Loss) %>% 
+  group_by(Owner) %>% 
+  summarise(Wins = sum(Win), 
+            Losses = sum(Loss)) 
+
+# lets also get the avearge points for and points against by owner
+avg_owner_score <- weekly_owner_scores1 %>% 
+  group_by(Owner) %>% 
+  summarise(avg_points_for = round(mean(`Points For`), 0), 
+            avg_points_against = round(mean(`Points Against`), 0))
+
+# stick this onto the wl data
+owner_wl_melt0 <- owner_wl1 %>% 
+  mutate(`Owner For/Against` = paste0(Owner, ":", `Avg Points For`, "/", `Avg Points Against`)) %>% 
+  select(Wins, Losses, `Owner For/Against`) %>% 
+  gather(Outcome, value, -`Owner For/Against`)
+
+ggplot(data = owner_wl_melt0, aes(x = `Owner For/Against`, y = value, fill = Outcome)) + 
+  geom_col(position = "dodge") + 
+  coord_flip() + 
+  scale_x_discrete(name = "Owner: Avg Points For / Avg Points Against ") + 
+  scale_y_continuous(breaks = 1:10, name = "Number of Wins or Losses") +
+    scale_fill_brewer(palette = "Set1") + 
+    ggtitle("TLST NFL Owner Win/Loss Record",
+          subtitle = "y-axis label represents owner and average points for / points against record") + 
+  labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text(),
+        legend.title = element_blank()) 
+
+```
+
+Well look at that. Jon and Joe were the same even even though Jon scored more on average. My blue bar is so short. Hopefully, this whole API thing will help me right the ship. 
+
+## Overall Weekly Performance
+
+The graph above is helpful to see overall season performance. But lets look at how things changed over time. First, we'll take a look at the weekly points for and points against for all team owners. Usually, you want to start with a simple table for this kind of thing. 
+
+```{r}
+
+# we made something further up in the chain that we'll grab here
+
+datatable(weekly_owner_scores1,
+          class = 'cell-border stripe',
+          rownames = FALSE, 
+          caption = "TLST 2017 NFL Season: Weekly Scores",
+          filter = 'top',
+          extensions = 'Buttons', 
+          options = list(dom = 'lBfrtip', 
+                         buttons = list('excel', "csv"),
+                          autoWidth = TRUE))
+
+```
+
+Ok, there you have it. We got a table. Feel free to download and analyze at your leisure. 
+
+Now that we have our table, lets make some graphs. First, we'll look at a simple graph of performance by week. (Getting those average lines in there was really hard so I hope you appreciate them.) 
+
+```{r, fig.align='center', fig.width= 12, fig.height=12}
+
+# melth the data down so we can get points for/against as a column
+weekly_owner_scores_melt0 <- weekly_owner_scores1 %>% 
+  gather(Points, value, -Week, -Owner) %>% 
+  group_by(Owner) 
+
+
+ggplot(data = weekly_owner_scores_melt0, aes(x = Week, y = value, color = Points, group = Points)) +
+  geom_line(size = 1.3) + 
+  geom_hline(data = avg_owner_score, 
+             aes(yintercept = avg_points_for), 
+             colour = "#377EB8", linetype = "dashed", size = 1.15) + 
+  geom_hline(data = avg_owner_score, 
+             aes(yintercept = avg_points_against), 
+             colour = "#E41A1C", linetype = "dashed", size = 1.15) + 
+  facet_wrap(~Owner) + 
+  scale_y_continuous("Point Total") + 
+  scale_colour_brewer(palette = "Set1") + 
+  facet_wrap(~Owner, scales = "free_x") + 
+  ggtitle("TLST NFL Weekly Point Totals by Owner",
+          subtitle = "Owner average indicated with dotted lines") + 
+  labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text(),
+        legend.title = element_blank()) 
+  
+  
+
+```
+
+Ok, now we're talking. `Charbod` seems to consistently beat the shit out of the people he plays. Wow. `F150Bod` also seems to win big when he's winning, but his performance did a funny little drop mid-season. `CrizzlyBod`, is terrible and deserves to have that loser trophy.
+
+We'll now drop the individual panels and show the distributions of points for and points against by owner. This is a good view because we are able to see the range of values that points for and points against can take for each owner. The black cross bar on the box plot represents the median. Outliers are indicated with dots. 
+
+```{r, fig.align='center', fig.width= 12, fig.height=12}
+
+ggplot(data = weekly_owner_scores_melt0, aes(x = Owner, y = value, fill = Points)) +
+  geom_boxplot() + 
+  scale_y_continuous("Point Total") + 
+  scale_fill_brewer(palette = "Set1") + 
+  ggtitle("TLST NFL Weekly Point Totals Distribution by Owner") + 
+  labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text(),
+        legend.title = element_blank()) +
+  coord_flip()
+
+
+```
+
+Looks like `BluesBod` had some pretty rough weeks based on his points for line extending way back past the 80 line. From this view we also easily see that Jon was the victim of `MinBod`'s epic week. And in view after view, we see `CharBod`'s dominance. His points for box is high and pretty tight meaning he consistently scores a lot. `F150Bod`'s bar box extends as far as anyone's but unfortunately also goes pretty far back, indicating some rough weeks. Not as rough as `CrizzleyBod`, though! Joe's boxes are kind of interesting because they are right on top of each other but his points for has a much lower median. In any event, it is the picture of a .500 record. 
+
+## Position Performance
+
+This Sleeper API provides every stat contribution for every stat category for every player. I don't know how valuable it is to look at the stat categories, but looking at score by player definitely could be interesting. One note: I am using the positions listed for players based on a daily updated reference API endpoint. I am not looking at the slot you had them at for any given week. I am looking at their listed position *today*. This likely won't cause too much trouble, but I wanted to call that out before some nerd tells me about a player who changed positions. Maybe in the future I can change the analysis to do it based on the positions we slot our players at. Who knows. 
+
+```{r, fig.width = 8, fig.height = 8}
+owner_position_view0 <- mu_unnest_view2 %>% 
+  filter(!is.na(position)) %>% 
+  group_by(display_name, position, week) %>% 
+  summarise(tot_contribution = sum(player_score, na.rm = TRUE)) %>% 
+  group_by(display_name, position) %>% 
+  summarise(avg_contribution = mean(tot_contribution, na.rm = TRUE)) %>% 
+  ungroup()
+
+# overall averages
+lg_position_view0 <- owner_position_view0 %>% 
+  group_by(position) %>% 
+  summarise(avg_contribution = mean(avg_contribution, na.rm = TRUE)) %>% 
+  ungroup()
+
+ggplot(data = owner_position_view0, 
+       aes(x = display_name, y = avg_contribution)) +
+  geom_hline(data = lg_position_view0, 
+             aes(yintercept = avg_contribution, colour = position),
+             show.legend = FALSE, size = 1.25) +
+  geom_point(aes(colour = position), size = 5, alpha = 0.8) + 
+  scale_colour_brewer(name = "Position", palette = "Set1") + 
+  scale_y_continuous(name = "Average Weekly Position Contribution") + 
+  scale_x_discrete(name = "") + 
+  ggtitle("Average Weekly Contribution by Position and Owner", 
+          subtitle = "Vertical lines represent league weekly average") + 
+  labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text(),
+        legend.title = element_blank()) + 
+  coord_flip()
+    
+```
+
+I mean, FFS, did I even start a tight end? I'm getting beat by `BluesBod` on that one. Oh, and my plan (can I really say it was a plan) to not draft any running backs this season until the 2340823048203483208 round is gonna go just great. Ok, anyways, I think this is a nice view. It shows the positions that really drive the value each week. For all of `GogBod`'s issues with defense, he does seem to be slightly out performing the average. `F150Bod` wins that category hands-down. `CharBod` shows us all why he is champ as he over performs across all categories. Joe's failure at running back that he constantly complained out is also on display. 
+
+Although it is kind of hard to read due to our giant league size, we can also look at position performance by week. 
+
+```{r, fig.height = 13, fig.width = 13}
+week_position_view0 <- mu_unnest_view2 %>% 
+  group_by(display_name, position, week) %>% 
+  summarise(position_score = sum(player_score)) %>% 
+  ungroup() 
+
+ggplot(data = week_position_view0, 
+       aes(x = as.numeric(week), 
+           y = position_score, 
+           fill = position, 
+           label = position_score)) + 
+  geom_col(colour = "black") + 
+  facet_wrap(~display_name) +
+  scale_x_continuous(breaks = 1:16, name = "Week") +
+  scale_y_continuous(name = "Total Score") + 
+  scale_fill_brewer(name = "Position", palette = "Set1") + 
+  ggtitle("Weekly Contribution by Position and Owner") + 
+  labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text(),
+        legend.title = element_blank()) 
+
+
+```
+
+The view allows us to see the total score for each owner for each week and how much of that came from each position. Sort of hard to get a lot from this, but it is funny to see those negative defense contributions. 
+
+## Player Performance
+
+Not sure what people would want to see here so I made a downloadable table. Have at it. What I'll probably work on for the 2019 season weekly reports are highlights of really good or really bad performances. We could do something for 2017 like best player by week by owner or position or somesuch. But, eh. I dunno. 
+
+
+```{r}
+
+player_week_view0 <- mu_unnest_view2 %>% 
+  filter(!is.na(player_score)) %>% 
+  select(display_name, week, matchup_id, last_name, 
+         first_name, position, player_score) %>% 
+  mutate(Week = as.factor(as.numeric(week)),
+         score = round(player_score, 2)) %>% 
+  mutate_at(c("display_name", "matchup_id", "last_name", "first_name", "position"), as.factor) %>% 
+  select(-week, -player_score) %>% 
+  rename(Owner = display_name, 
+         Matchup = matchup_id, 
+         `Last Name` = last_name, 
+         `First Name` = first_name, 
+         Position = position, 
+         Score = score) %>% 
+  select(Week, everything())
+
+datatable(player_week_view0,
+          class = 'cell-border stripe',
+          rownames = FALSE, 
+          caption = "TLST 2017 NFL Season: Player Weekly Scores",
+          filter = 'top',
+          extensions = 'Buttons', 
+          options = list(dom = 'lBfrtip', 
+                         buttons = list('excel', "csv"),
+                         pageLength = 14, autoWidth = TRUE))
+
+```
+
+
+## Conclusion
+
+Ok, well that is all I got. Hopefully I'll be back by the end of next week or so with some data on the first week of 2019. No promises, though. The content I made for this will be pretty different than what I'll put together for any kind of weekly recaps. Sleeper is awesome so the code to fetch and gather the data will not need updating. I'll just have to figure out what kind of analytic content I should put together for weekly updates. I am open to suggestions. 
+
+If anyone is a super nerd, I am using GitHub for source control on this and the [repository is linked out here](https://github.com/ncriswell/sleeper_fantasy). I am using the `R` language along with the `knitr` package to make these. All that code is out on the repo so feel free to go poke around if that is your thing. 
+
+## Appendix
+
+### What the Hell is an API?
+
+Sleeper continues to be the best fantasy platform, and its not even close. One of their many, many updates (apparently) was the inclusion of weekly player stats to their API end points. As someone who took one programming class around 15 years ago, you should take this with a grain of salt, but from what I can tell an Application Programming Interface is sort of this catch-all term that refers to things that let computers talk to each other. So Sleeper has set up read-only end points as URLs that I (or anyone) can write code to fetch data from. For instance, [go to this link](https://api.sleeper.app/v1/stats/nfl/regular/2017/1). Just try it, I'm telling you, its great. Those are the week 1 stats for all players for the 2017 season. I can write a program that takes that wall of text and parses it for the useful stuff. No other platform even comes close to having a (free) usable API like this. 

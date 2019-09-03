@@ -87,7 +87,7 @@ stats_res <- lapply(1:16,
                       fromJSON(
                         glue("https://api.sleeper.app/v1/stats/nfl/regular/2017/",
                              m)
-                      ))
+                      )) 
 
 # The stats are a list in a list in a list. Combine each week into a large 
 #  data frame. 
@@ -96,14 +96,19 @@ stats_res_comb <- lapply(stats_res, function(m) bind_rows(m, .id = "player_id"))
 # now combine THESE into a really large data frame
 stats_view0 <- bind_rows(stats_res_comb, .id = "week")
 
+# In 2017, the stats frame contains a lot of competely blank lines. This ends 
+#  creating some issues with duplicated column names. Fix that here. 
+stats_view1 <- stats_view0[, !duplicated(colnames(stats_view0))]
+
+
 # Find the columns that have relavent stats in our league. We'll pull those
 #  out along with the player_id
 stat_cols <- c("player_id", "week",
-               names(stats_view0)[names(stats_view0) %in% s17_lg_rules$stat_code])
+               names(stats_view1)[names(stats_view1) %in% s17_lg_rules$stat_code])
 
 # Now select those column and melt the data so we can stick our metric values 
 #  onto it. 
-stats_melt0 <- stats_view0 %>% 
+stats_melt0 <- stats_view1 %>% 
   select(stat_cols) %>% 
   gather(stat_code, stat_actual, -player_id, -week) %>% 
   mutate(stat_actual = case_when(is.na(stat_actual) ~ 0, 
@@ -124,6 +129,8 @@ player_stats_sum0 <- stats_melt1 %>%
 # Combine this with the player names so we can check some shit
 player_stats_sum1 <- player_stats_sum0 %>% 
   left_join(player_view0, by = "player_id")
+
+colMeans(is.na(player_stats_sum1))
 
 #### ~~Matchup Data~~ ####======================================================
 # Get the matchup data
