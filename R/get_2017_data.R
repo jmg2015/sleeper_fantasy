@@ -139,7 +139,8 @@ mu_res <- lapply(1:16,
                                            s17_lg_id, 
                                            "/matchups/", m)))
 
-mu_comb0 <- bind_rows(mu_res, .id = "week") %>% as_tibble()
+mu_comb0 <- bind_rows(mu_res, .id = "week") %>% as_tibble() %>% 
+  filter(!is.na(matchup_id))
 
 # get rid of some useless columns
 mu_comb1 <- mu_comb0 %>% 
