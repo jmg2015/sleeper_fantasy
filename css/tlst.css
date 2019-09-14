@@ -5,16 +5,15 @@ body {
 }
 
 
-/* h1 {
+h1 {
   font-weight: 300;
   font-size: 32px;
   color:  #143D8D;
   padding: 5px 5px 5px 5px;
-  background: #377EB8;
+
   border-radius: 5px;
   border-color: #C8C9C7;
-  border-style: solid;
-  border-width: 1px;
+
 }
 
 h2 {
@@ -35,7 +34,7 @@ caption::before{
   content: "Table " counter(table) ": ";
 }
 
-#TOC {border-color: #377EB8;} */
+#TOC {border-color: #377EB8;} 
 
 .tocify .list-group-item:hover, .tocify .list-group-item:focus {
     background-color: #C9CACC;

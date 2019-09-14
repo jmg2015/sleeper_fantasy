@@ -1,0 +1,516 @@
+---
+title: 'The League Season Thunderdome: The Sequel - 2019 Season Week 1'
+always_allow_html: yes
+output: 
+  html_document:
+    css: ../css/tlst.css
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(jsonlite)       # Pulling down JSON data
+library(tidyverse)      # Tools for data analysis
+library(glue)           # Sticking strings together
+library(RColorBrewer)   # Color Pals
+library(plotly)         # Interactive graphics
+library(DT)             # JS datatables package
+library(ggthemes)       # For 538 theme
+library(scales)         # Labels for ggplot scales
+```
+
+
+## Week One Analysis
+
+```{r get_data, cache=TRUE}
+source("global.R")
+ 
+# Get league info for 2019 season
+s19_info <- F_get_lg_info(user_id = user_id, season = 2019)
+
+# unload some information from this
+lg_id <- s19_info$lg_id
+lg_owners <- s19_info$user_vw0
+lg_rules <- s19_info$lg_rules
+
+#### Combining Data ####========================================================
+
+# pull matchup and stat information
+mu_out <- F_get_weekly_matchup(season = 2019, week = 1)
+mu_view0 <- mu_out$mu_view0
+
+stat_out <- F_get_weekly_player_stats(season = 2019, week = 1)
+stat_sum0 <- stat_out$player_stats_sum0
+stat_melt0 <- stat_out$stats_melt1
+
+# combine the matchup and stat data
+mu_view1 <- mu_view0 %>% 
+  left_join(stat_sum0, 
+            by = c("player_id" = "player_id", 
+                   "week" = "week"))
+
+# add in the owner name
+mu_view2 <- mu_view1 %>% 
+  left_join(lg_owners, 
+            by = c("roster_id" = "roster_id"))
+
+# add in player information
+mu_view3 <- mu_view2 %>% 
+  left_join(player_view0, 
+            by = c("player_id" = "player_id"))
+
+```
+
+And we're back with more nerd stuff. As long as Sleeper keeps easily delivering this data through their API, I can keep making these. My goal is to set things up so I can pretty much push a button and they will generate each week. But for that to happen, I'll really have to have the content nailed down which won't be possible until a few weeks have passed. Sort of hard to trend on a single week, ya know? Also, this stuff is all still pretty basic retrospective analysis based on players actually started. I have some things on the roadmap to examine missed opportunity based on benched players or players who aren't on our teams. I also would like to start trying to predict stuff. The problem with that is I would have to probably learn a lot more about football than I currently know. That's all for a different day, I guess. I am also open to suggestions on what kind of data folks want to see. So <a href = "mailto: ncriswell@gmail.com">hollatchaboi</a> if you have any ideas. Oh, and I spot check this stuff, but if you see some number that doesn't match reality, let me know. 
+
+Also, I had been kicking around some Pythagorean win expectancy stuff in my head since I started playing with the API. There is a historic margin of victory analysis that kind of came up naturally in this week's project so I had a bunch of data in my workspace that I could use for the Pythagorean stuff. So that is at the end if you want to check it out. It's your life, man. I'm not going to live it for you. 
+
+### Winners and Losers
+
+We'll start with a simple review of the matchups from last week. For the blow-by-blow stuff, check out Joe's newsletter. I think this last week's was a pretty good one. 
+
+```{r, fig.align='center', fig.width=6, fig.height=6}
+
+weekly_owner_scores0 <- mu_view3 %>% 
+  group_by(week, display_name, starter, matchup_id) %>% 
+  summarise(tot_points = sum(player_score, na.rm = TRUE)) %>% 
+  ungroup()
+
+# join this back onto 
+weekly_owner_scores1 <- weekly_owner_scores0 %>% 
+  left_join(weekly_owner_scores0, by = c("week", "matchup_id", "starter")) %>% 
+  filter(display_name.x != display_name.y) %>% 
+  mutate(Week = as.factor(week),
+         display_name.x = as.factor(display_name.x)) %>% 
+  select(Week, display_name.x, tot_points.x, tot_points.y, starter, matchup_id) %>% 
+  rename(`Owner` = display_name.x, 
+         `Points For` = tot_points.x, 
+         `Points Against` = tot_points.y) %>% 
+  arrange(Week) %>% 
+  mutate(Outcome = case_when(`Points For` > `Points Against` ~ "Win", 
+                             TRUE ~ "Loss"))
+
+ggplot(data = weekly_owner_scores1 %>% filter(starter == TRUE),
+       aes(x = matchup_id, y = `Points For`, fill = Outcome, label = Owner)) + 
+  geom_bar( position = "dodge", stat = "identity") + 
+  geom_text(position = position_dodge(width = 1),
+             angle = 0, size = 3) + 
+  geom_hline(yintercept = median(weekly_owner_scores1 %>% 
+                                   filter(starter == TRUE) %>% 
+                                   pull(`Points For`))) + 
+  geom_hline(yintercept = mean(weekly_owner_scores1 %>% 
+                                   filter(starter == TRUE) %>% 
+                                   pull(`Points For`)),
+             linetype = "dashed") + 
+  scale_fill_brewer(palette = "Set1") + 
+  coord_flip() + 
+  ggtitle("TLST: TS - 2019 Season Week 1 Results",
+          subtitle = "Teams are grouped by matchup. Solid line is week median. Dotted line is week average") + 
+  labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text(),
+        axis.title.y = element_blank(), 
+        axis.text.y = element_blank())
+```
+
+This week didn't include major cheap wins or losses. If Zach and Max had matched up, the top seven scoring teams would have won. As it is, six of the top seven scores and the eighth highest scoring team notched wins. Not too bad.  Maybe as the season goes along, we'll examine any patterns in cheap wins to see if some people seem to enjoy some kind of matchup benefit. 
+
+### Margin of Victory 
+
+Since I started doing stuff with this API, I have noticed interesting things which were probably obvious to others who but that I hadn't observed before. Looking at the graph above, I see pretty high margins of victory relative to the total scores. This is also demonstrated below. 
+
+```{r, fig.align='center', fig.height=6, fig.width=6}
+
+mov0 <- weekly_owner_scores1 %>% 
+  filter(Outcome == "Win", starter == TRUE) %>% 
+  mutate(Margin = `Points For` - `Points Against`, 
+         `Margin %` = Margin / `Points For`)
+
+ggplot(data = mov0, aes(x = Owner, y = Margin)) +
+  geom_segment(aes(xend = Owner, yend = 0)) +
+  geom_point(size = 4, colour = "black") +
+  geom_text(aes(label = percent(`Margin %`), 
+                y = Margin + 4)) +
+  scale_fill_gradient(low = "white", high = "#377EB8", label = percent, 
+                      breaks = seq(0, 0.5, by = 0.25),
+                      limits = c(0, 0.5)) +
+  coord_flip() +
+  ggtitle("TLST: TS - 2019 Season Week 1 Margin of Victory %",
+          subtitle = "Margin % indicated in text computed as Margin / Points For") +
+  labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text(),
+        axis.title.y = element_blank(),
+        legend.text = element_text())
+
+```
+
+Is this normal? This week, people could have won without starting players. I could have won without my running backs. Since Sleeper is magic, we can pull the margin of victory stats on prior seasons with relative ease. 
+
+```{r, cache=TRUE}
+
+# Pull 2017, 2018 matchup information
+# Need some league info first
+s17_info <- F_get_lg_info(user_id = user_id, season = 2017)
+s18_info <- F_get_lg_info(user_id = user_id, season = 2018)
+
+# unload some information from this
+lg_id_17 <- s17_info$lg_id
+lg_id_18 <- s18_info$lg_id
+# mu info
+
+mu_17_out <- F_get_weekly_matchup(season = 2017, week = 1:16, .lg_id = lg_id_17)
+mu_18_out <- F_get_weekly_matchup(season = 2018, week = 1:16, .lg_id = lg_id_18)
+
+mu_17_view0 <- mu_17_out$mu_view0 %>%
+  mutate(season = "2017")
+
+mu_18_view0 <- mu_18_out$mu_view0 %>%
+  mutate(season = "2018")
+
+# Get only the topline numbers; join on to get MOV
+mu_17_sum0 <- mu_17_view0 %>%
+  filter(!is.na(matchup_id)) %>%
+  select(-player_id, -starter) %>%
+  distinct()
+
+mu_17_sum1 <- mu_17_sum0 %>%
+  left_join(mu_17_sum0, by = c("matchup_id", "week", "season")) %>%
+  filter(roster_id.x != roster_id.y)
+
+ mu_17_sum1 <- mu_17_sum1 %>%
+   mutate(outcome = case_when(points.x > points.y ~ "Win",
+                              TRUE ~ "Loss")) %>%
+   #select(-roster_id.x, -roster_id.y) %>%
+   filter(outcome == "Win") %>%
+   mutate(Margin = points.x - points.y)
+
+ mu_18_sum0 <- mu_18_view0 %>%
+   filter(!is.na(matchup_id)) %>%
+   select(-player_id, -starter) %>%
+   distinct()
+
+ mu_18_sum1 <- mu_18_sum0 %>%
+   left_join(mu_18_sum0, by = c("matchup_id", "week", "season")) %>%
+   filter(roster_id.x != roster_id.y) %>%
+   mutate(outcome = case_when(points.x > points.y ~ "Win",
+                              TRUE ~ "Loss")) %>%
+   #select(-roster_id.x, -roster_id.y) %>%
+   filter(outcome == "Win") %>%
+   mutate(Margin = points.x - points.y)
+
+ moe_sum0 <- bind_rows(select(mu_17_sum1, week, season, Margin),
+                       select(mu_18_sum1, week, season, Margin))
+
+
+```
+
+```{r, fig.align='center', fig.width = 8, fig.height=8}
+
+ggplot(data = moe_sum0, aes(x = as.factor(as.numeric(week)),
+                            y = Margin, fill = season)) +
+  geom_boxplot() +
+  scale_x_discrete(name = "Week") +
+  scale_fill_brewer(name = "Season",
+                    palette = "Set1") +
+  ggtitle("TLST: TS - Margin of Victory Distribution by Week",
+          subtitle = "Solid black line in box is median; box is bound by 25th and 75th percentiles") +
+  labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text())
+
+
+```
+
+Wow. So really, we don't have a ton of close matchups. The median margin of victory is *routinely* more than 25 points. And Ball have mercy on whatever happened to someone in week four of 2018. 
+
+### Position Analysis
+
+Now on to some more analysis of weekly data which will be super easy to make push button. How are each owner's teams performing by position? First, I'll throw out a downloadable table. Have at it. 
+
+```{r}
+
+mu_dt <- mu_view3 %>% 
+  mutate(Week = as.factor(as.numeric(week)),
+         Score = round(player_score, 2)) %>% 
+  select(Week, display_name, matchup_id, position, last_name, 
+         first_name, Score, starter) %>% 
+  mutate_at(c("display_name", "matchup_id", "position", "last_name", "first_name"), as.factor) %>% 
+  rename(Owner = display_name, 
+         Matchup = matchup_id,
+         Last = last_name, 
+         First = first_name, 
+         Position = position,
+         Starter = starter) 
+
+datatable(mu_dt,
+          class = 'cell-border stripe',
+          rownames = FALSE, 
+          caption = "TLST: TS 2019 NFL Season: Weekly Stats",
+          filter = 'top',
+          extensions = 'Buttons', 
+          options = list(dom = 'lBfrtip', 
+                         buttons = list('excel', "csv"),
+                         pageLength = 10, autoWidth = TRUE))
+
+
+```
+
+We can get a visual of that, too. 
+
+```{r, fig.align='center', fig.height=8, fig.width=10}
+# let's order the players by their total scores
+weekly_owner_scores_sum0 <- weekly_owner_scores1 %>% 
+  filter(starter == TRUE) %>% 
+  mutate(Owner_Rank = rank(`Points For`)) %>% 
+  select(Owner, Owner_Rank)
+
+weekly_owner_position0 <- mu_view3 %>% 
+  group_by(week, display_name, starter, matchup_id, position) %>% 
+  summarise(position_points = sum(player_score, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(Week = as.factor(week), 
+         display_name = as.factor(display_name)) %>% 
+  rename(Owner = display_name,
+         `Points For` = position_points) %>% 
+  ungroup() %>% 
+  left_join(weekly_owner_scores_sum0)
+  
+ggplot(data = weekly_owner_position0 %>% filter(starter == TRUE),
+       aes(x = fct_reorder(Owner, Owner_Rank),  y = `Points For`, fill = position, label = round(`Points For`, 1))) + 
+  geom_bar( stat = "identity", colour = "black") + 
+  geom_text(position = position_stack(vjust = 0.5), size = 3) + 
+  scale_fill_brewer(palette = "Set1", name = "Position") +
+  ggtitle("TLST: TS - 2019 Season Week 1 Owner Position Scores")  +
+    labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  coord_flip() + 
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text(),
+        axis.title.y = element_blank())
+
+
+```
+
+Although this view is useful, there are a couple of issues with it. First, it segments by position but the FLEX spot allows us to kind of skew the numbers if looking at scores by position. Some people use RBs; some use WRs; and I guess you could use a TE if you wanted to. But still, I think this view is kind of nice. 
+
+Jon's domination in RB is on display. We also see that Otto might be in trouble. That many points by a QB doesn't happen all that often but without it, he would have really gotten killed. Joe's inadequacy at WR are staring at him in bright yellow pixels. (If he's reading this.) And I know that Joe says I am going to have a good year, but I think this graph shows I might not. I got quite a few points from TE, DEF, and K. Is that always going to happen? I have no idea. From the 2018 analysis, it is really obvious that RB and WR run the show for points. With the margin analysis, we know that games aren't often close. So I don't really know. I *could* be in a spot where I have three positions punching above their weight class to shore up my issues in RB. Or these positions might come back down to earth, and I start getting steamrolled. Who knows. 
+
+Another useful way to show this view is to make the bars all the same length and have the segment length be proportional to the percentage contribution. 
+
+
+```{r, fig.align='center', fig.height=8, fig.width=10}
+
+weekly_owner_position_p0 <- weekly_owner_position0 %>% 
+  filter(starter == TRUE) %>% 
+  group_by(Owner, week) %>% 
+  mutate(p_score = `Points For` / sum(`Points For`))
+
+
+ggplot(data = weekly_owner_position_p0, 
+       aes(x = fct_reorder(Owner, Owner_Rank),  y = `p_score`, 
+           fill = position, 
+           label = percent(round(`p_score`, 2)))) + 
+  geom_bar( stat = "identity", colour = "black") + 
+  geom_text(position = position_stack(vjust = 0.5),
+            size = 3) + 
+  scale_fill_brewer(palette = "Set1", name = "Position") + 
+  scale_y_continuous(name = "% of Total Score", 
+                     labels = percent) + 
+  coord_flip() + 
+  ggtitle("TLST: TS - 2019 Season Week 1 Owner Position Contributions")  +
+    labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  coord_flip() + 
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text(),
+        axis.title.y = element_blank())
+
+```
+
+This is sort of what I'm worried about. 20% of my points came from positions that are generally not reliable for lots of points. I also don't think I can count on 23 points from TE on a routine basis. If only there were some way to alter my team after the draft. Oh well. 
+
+That is all I have on the weekly update. Like I said, this will be more built out when we have more weeks. Everything besides the little detour on margin of victory is scripted and can be updated next week without making really any changes to the code. 
+
+## Pythagorean Win Expectation
+
+Like I said, I have all the data in my `R` workspace to do Pythagorean analysis so we might as well do it. This part is unlikely to help anyone actually get better at fantasy. 
+
+### What is This? 
+
+The [Pythagorean Win Expectation](https://www.baseball-reference.com/bullpen/Pythagorean_Theorem_of_Baseball) was developed by Bill James for baseball and attempts to explain the relationship between runs and wins. The idea is that you can look at runs scored and runs allowed in a season and predict that team's winning percentage. Run differential is a simpler, related metrics but the Pythag approach does a better job. The initial formula for baseball is:
+
+$$ \text{Winning Percentage} = \frac{\text{Runs Scored}^2}{\text{Runs Scored}^2 + \text{Runs Allowed}^2} $$
+
+Let's compare this prediction for winning percentage to the simple run differential. We'll use data from the [Lahman](http://www.seanlahman.com/) database. He has all kinds of stuff going all the way back to the 1871 season, but we'll limit things from 1950 - 2018 to eliminate noise from The Drinkin' Beers and Rippin' Cigs while Playing Era. 
+
+```{r, fig.align='center', fig.height=7, fig.width=7}
+library(Lahman)
+
+teams_df <- Teams %>% 
+  as_tibble() %>% 
+  filter(yearID >= 1950) %>% 
+  mutate(pythag = R ^ 2 / (R ^2 + RA ^2), 
+         run_diff = R - RA,
+         wp = W / G)
+
+ggplot(data = teams_df, aes(x = pythag, y = wp)) + 
+  geom_point() + 
+  scale_x_continuous(name = "Pythagorean Estimate",
+                     label = percent) + 
+  scale_y_continuous(name = "Actual Winning Percentage", 
+                     label = percent) + 
+  geom_smooth(method = "lm", formula = y~x) + 
+  geom_abline(slope = 1, intercept = 0, colour = "#E41A1C") + 
+  ggtitle("Comparison of Pythagorean Estimate and Actual MLB Winning Percentage",
+          subtitle = "Red line indicates perfect fit. Actual fit is indicated in blue") + 
+  labs(caption = "Lahman Data: 1950-2018") + 
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text())
+
+
+
+```
+
+Ok, well there you have it. It does a pretty good job. Nerds like to play with things and often find that an exponent of around 1.8 does a better job. Finding new exponents based on actual performance is important and do-able. Keep that in mind...
+
+### Adapting for Football
+
+It is possible to adapt this approach to NFL games. We can use points scored and points allowed. However, the [exponent for football is 2.37.](https://en.wikipedia.org/wiki/Pythagorean_expectation) Lets see how this works for our league. 
+
+```{r}
+# get owner info
+owners_17_view0 <- s17_info$user_vw0
+owners_18_view0 <- s18_info$user_vw0
+
+mu_17_sum2 <- mu_17_sum0 %>%
+  filter(!is.na(matchup_id)) %>% 
+  left_join(mu_17_sum0, by = c("matchup_id", "week", "season")) %>%
+  filter(roster_id.x != roster_id.y) %>% 
+  left_join(owners_17_view0, by = c("roster_id.x" = "roster_id")) %>% 
+  group_by(display_name, season) %>% 
+   summarise(`Points For` = round(sum(points.x), 2), 
+            `Points Against` = round(sum(points.y), 2), 
+            Wins = sum(points.x > points.y, na.rm = TRUE), 
+            Losses = sum(points.x < points.y, na.rm = TRUE), 
+            win_p = round(sum(points.x > points.y) / n(), 2)) %>% 
+  ungroup() %>% 
+  mutate(pythag = round(`Points For`^2 / (`Points For` ^ 2 + `Points Against`^2), 2))
+
+mu_18_sum2 <- mu_18_sum0 %>%
+  filter(!is.na(matchup_id)) %>% 
+  left_join(mu_18_sum0, by = c("matchup_id", "week", "season")) %>%
+  filter(roster_id.x != roster_id.y) %>% 
+  left_join(owners_18_view0, by = c("roster_id.x" = "roster_id")) %>% 
+  group_by(display_name, season) %>% 
+  summarise(`Points For` = round(sum(points.x), 2), 
+            `Points Against` = round(sum(points.y), 2), 
+            Wins = sum(points.x > points.y, na.rm = TRUE), 
+            Losses = sum(points.x < points.y, na.rm = TRUE), 
+            win_p = round(sum(points.x > points.y) / n(), 2)) %>% 
+  ungroup() %>% 
+  mutate(pythag = round(`Points For`^2.37 / (`Points For` ^ 2.37 + `Points Against`^2.37), 2))
+
+# combine these
+pythag_sum <- mu_18_sum2 %>% bind_rows(mu_17_sum2) %>% 
+  mutate(Difference = win_p - pythag) %>% 
+  mutate_at(c("display_name", "season"), as.factor) %>% 
+  rename(Owner= display_name, 
+         `Win %` = win_p, 
+         `Pythag Est` = pythag,
+         Season = season) 
+  
+
+datatable(pythag_sum,
+          class = 'cell-border stripe',
+          rownames = FALSE, 
+          caption = "TLST: TS Actual Winning % v. Pythagorean Expectation",
+          filter = 'top',
+          extensions = 'Buttons', 
+          options = list(dom = 'lBfrtip', 
+                         buttons = list('excel', "csv"),
+                         pageLength = 10, autoWidth = TRUE))
+
+
+```
+
+There you have it as a table. Let's add a little color...
+
+```{r, fig.align='center', fig.height=8, fig.width=8}
+
+# melt this down
+pythag_melt <- pythag_sum %>% 
+  select(Season, Owner, `Win %`, `Pythag Est`) %>% 
+  gather(key, value, -Season, -Owner)
+
+ggplot(data = pythag_melt, aes(x = Owner, y = value, fill = key)) + 
+  geom_col(position = "dodge", colour = "black") + 
+  facet_wrap(~Season, scales = "free_y") + 
+ scale_fill_brewer(palette = "Set1") + 
+  scale_y_continuous(label = percent) + 
+  coord_flip() + 
+  ggtitle("TLST: TS - Win % v. Pythag Estimate",
+          subtitle = "Pythagorean exponent of 2.37 used") + 
+  labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text(),
+        legend.title = element_blank(),
+        axis.title.x = element_blank())
+        
+
+
+```
+
+Well that is interesting. In addition to committing the mortal sin of Changing His Name and Ruining Data Integrity between Seasons, Charlie's actual winning percentages exceed what we'd expect based on the points he scores and the points scored against him in both seasons. Zach and Joe are guilty of this in 2017 as well. Sam suffers some really bad luck as his Pythagorean estimate is actually sort of respectable in 2017-not so much is actual percentage. And when you consider that these are percentages of 16 game seasons, something like my difference of 20% in 2018 is *three games* worth of difference. Charlie, feel free to drop that trophy off next time you're driving by Pocahontas. 
+
+One that that we *can do* is determine a better fit for that exponent. You'll have to take my word for it, but we can rearrange the formula for the Pythagorean percentage to be linear in the exponent. After some algebra magic, we end up with:
+
+$$\ln\frac{W}{L} = n \times \ln\frac{\text{Points For}}{\text{Points Against}}  $$
+
+$n$ is the empirically determined exponent. We can make a plot with $\ln\frac{W}{L}$ on the $y$ and $\ln\frac{\text{Points For}}{\text{Points Against}} $ on the $x$, draw a line through it and that slope is our actual exponent. 
+
+
+```{r}
+
+pythag_sum1 <- pythag_sum %>% 
+  mutate(lgwl = log(Wins / Losses), 
+         lgpts = log(`Points For` / `Points Against`))
+
+lm1 <- lm(lgwl ~ lgpts + 0, data = pythag_sum1)
+
+ggplot(data = pythag_sum1, aes(x = lgpts, y = lgwl)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", formula = y~x + 0) + 
+  scale_y_continuous(name = expression(log(frac("Wins", "Losses")))) + 
+  scale_x_continuous(name = expression(log(frac("Points For", "Points Against")))) + 
+  ggtitle("Log Ration Relationship") +
+  labs(caption = "Data pulled through Sleeper API https://docs.sleeper.app/") +
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text())
+  
+  
+```
+
+Please note, we are forcing that line through 0 as the intercept? Whats that? You quit reading several sections ago? Fantastic. Anyways, I am about 20 minutes over budget on the time I was going to bury into this today and so I'm just going to bring the regression summary which gives us the slope of the line as the coefficient on `lgwl`. 
+
+
+```{r}
+pander::pander(summary(lm1))
+
+```
+
+So the coefficient for this league is actually 6.924. Crazy. 
+
+&nbsp;
+<hr />
+<p style="text-align: center;"><a href="https://github.com/ncriswell/sleeper_fantasy">Git it while it's hot</a></p>
+<p style="text-align: center;"><span style="color: #808080;"><em>ncriswell@gmail.com</em></span></p>
+
+<!-- Add icon library -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+
+<!-- Add font awesome icons -->
+<p style="text-align: center;">
+    <a href="https://github.com/ncriswell/" class="fa fa-github"></a>
+</p>
+
+&nbsp;
